@@ -87,7 +87,7 @@ jobs:
         with:
           host: ${{ secrets.SERVER_IP }}
           username:  ${{ secrets.SERVER_USER }}
-          key: ${{ secrets. SERVER_SSH_KEY }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             echo "Checking deployment status..."
             /home/alphabit/scripts/status.sh
