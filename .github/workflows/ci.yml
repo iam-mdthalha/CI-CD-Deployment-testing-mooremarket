@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '20.x'
           cache: npm
-          cache-dependency-path: mooremarket/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         working-directory: mooremarket
