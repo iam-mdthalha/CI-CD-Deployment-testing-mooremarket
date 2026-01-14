@@ -24,11 +24,9 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: mooremarket
         run: npm ci --no-audit --no-fund
 
       - name: Run linter
-        working-directory: mooremarket
         run: npm run lint --if-present
 
   test:
@@ -44,11 +42,9 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: mooremarket
         run: npm ci --no-audit --no-fund
 
       - name: Run tests
-        working-directory: mooremarket
         run: npm test --if-present
 
       - name: Upload test results
@@ -56,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: mooremarket/coverage/
+          path: coverage/
           retention-days: 7
 
   build:
@@ -70,7 +66,7 @@ jobs:
       - name: Build Docker image (test only)
         uses: docker/build-push-action@v5
         with:
-          context: mooremarket
+          context: .
           push: false
           tags: mooremarket:test
           cache-from: type=gha
