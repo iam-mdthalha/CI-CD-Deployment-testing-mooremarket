@@ -1,0 +1,226 @@
+name: Release - Create Version Tag
+
+on:
+  push: 
+    branches: 
+      - main
+  workflow_dispatch: 
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: 🏷️ Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      new_tag: ${{ steps.version.outputs.new_tag }}
+
+    steps:
+      - name:  Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get current version
+        id: current
+        run: |
+          if [ -f version.json ]; then
+            CURRENT_VERSION=$(cat version.json | grep -oP '"version":\s*"\K[^"]+')
+          else
+            CURRENT_VERSION="0.0.0"
+          fi
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name:  Determine version bump type
+        id: bump_type
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            BUMP_TYPE="${{ github.event.inputs.version_type }}"
+          else
+            # Auto-detect from commit messages
+            COMMITS=$(git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo "").. HEAD 2>/dev/null || git log --oneline)
+            
+            if echo "$COMMITS" | grep -qiE "BREAKING CHANGE|! : "; then
+              BUMP_TYPE="major"
+            elif echo "$COMMITS" | grep -qiE "^feat"; then
+              BUMP_TYPE="minor"
+            else
+              BUMP_TYPE="patch"
+            fi
+          fi
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Bump type: $BUMP_TYPE"
+
+      - name: Calculate new version
+        id: version
+        run: |
+          CURRENT="${{ steps.current.outputs.current_version }}"
+          BUMP_TYPE="${{ steps.bump_type.outputs.bump_type }}"
+          
+          # Split version into parts
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          
+          # Increment based on bump type
+          case $BUMP_TYPE in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          NEW_TAG="v${NEW_VERSION}"
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+          echo "New tag: $NEW_TAG"
+
+      - name:  Update version.json
+        run: |
+          echo '{"version":  "${{ steps.version.outputs.new_version }}"}' > version.json
+          cat version.json
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          echo "## What's Changed in ${{ steps.version.outputs.new_tag }}" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          
+          # Generate changelog from commits
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Commits" >> RELEASE_NOTES.md
+            git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD >> RELEASE_NOTES.md
+          else
+            echo "### Commits" >> RELEASE_NOTES.md
+            git log --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md
+          fi
+          
+          echo "" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "---" >> RELEASE_NOTES.md
+          echo "*Released on $(date +'%Y-%m-%d %H:%M:%S UTC')*" >> RELEASE_NOTES.md
+          
+          cat RELEASE_NOTES.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          if [ !  -f CHANGELOG.md ]; then
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "All notable changes to this project will be documented in this file." >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+          fi
+          
+          # Prepend new release to changelog
+          echo "" >> NEW_CHANGELOG.md
+          echo "## [${{ steps.version.outputs.new_tag }}] - $(date +'%Y-%m-%d')" >> NEW_CHANGELOG.md
+          echo "" >> NEW_CHANGELOG.md
+          
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          # Categorize commits
+          echo "### 🚀 Features" >> NEW_CHANGELOG.md
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s" $PREV_TAG..HEAD | grep -E "^- feat" >> NEW_CHANGELOG.md || echo "- No new features" >> NEW_CHANGELOG.md
+          else
+            git log --pretty=format:"- %s" | grep -E "^- feat" >> NEW_CHANGELOG.md || echo "- No new features" >> NEW_CHANGELOG.md
+          fi
+          
+          echo "" >> NEW_CHANGELOG.md
+          echo "### 🐛 Bug Fixes" >> NEW_CHANGELOG.md
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s" $PREV_TAG..HEAD | grep -E "^- fix" >> NEW_CHANGELOG.md || echo "- No bug fixes" >> NEW_CHANGELOG.md
+          else
+            git log --pretty=format:"- %s" | grep -E "^- fix" >> NEW_CHANGELOG.md || echo "- No bug fixes" >> NEW_CHANGELOG.md
+          fi
+          
+          echo "" >> NEW_CHANGELOG.md
+          echo "### 🔧 Other Changes" >> NEW_CHANGELOG.md
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s" $PREV_TAG..HEAD | grep -vE "^- (feat|fix)" >> NEW_CHANGELOG.md || echo "- No other changes" >> NEW_CHANGELOG.md
+          else
+            git log --pretty=format:"- %s" | grep -vE "^- (feat|fix)" >> NEW_CHANGELOG.md || echo "- No other changes" >> NEW_CHANGELOG.md
+          fi
+          
+          echo "" >> NEW_CHANGELOG.md
+          
+          # Merge new changelog with existing
+          head -5 CHANGELOG.md > TEMP_CHANGELOG.md
+          cat NEW_CHANGELOG.md >> TEMP_CHANGELOG.md
+          tail -n +6 CHANGELOG.md >> TEMP_CHANGELOG.md 2>/dev/null || true
+          mv TEMP_CHANGELOG.md CHANGELOG.md
+          rm -f NEW_CHANGELOG.md
+
+      - name: Commit version changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add version.json CHANGELOG.md
+          git commit -m "chore(release): bump version to ${{ steps.version.outputs.new_version }}" || echo "No changes to commit"
+          git push origin main
+
+      - name:  Create Git tag
+        run: |
+          git tag -a ${{ steps.version.outputs.new_tag }} -m "Release ${{ steps.version.outputs.new_tag }}"
+          git push origin ${{ steps.version.outputs.new_tag }}
+
+      - name:  Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const releaseNotes = fs.readFileSync('RELEASE_NOTES.md', 'utf8');
+            
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: '${{ steps.version.outputs.new_tag }}',
+              name:  'Release ${{ steps.version. outputs.new_tag }}',
+              body: releaseNotes,
+              draft: false,
+              prerelease: false
+            });
+
+      - name: Summary
+        run: |
+          echo "=============================================="
+          echo "        RELEASE CREATED SUCCESSFULLY"
+          echo "=============================================="
+          echo ""
+          echo "📦 Version: ${{ steps.version.outputs.new_version }}"
+          echo "🏷️  Tag: ${{ steps.version.outputs.new_tag }}"
+          echo ""
+          echo "=============================================="
