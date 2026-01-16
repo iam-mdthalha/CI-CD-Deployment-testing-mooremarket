@@ -190,7 +190,7 @@ jobs:
           
           git add version.json CHANGELOG.md
           git commit -m "chore(release): bump version to ${{ steps.version.outputs.new_version }}" || echo "No changes to commit"
-          git push origin dev
+          git push origin main
 
       - name:  Create Git tag
         run: |
