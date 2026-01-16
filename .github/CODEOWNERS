@@ -1,19 +1,15 @@
-# This file defines code owners for the repository
-
-# These users will be automatically requested for review
-
-# Default owners for everything
+# Default owner for everything
 
 - @iam-mdthalha
 
-# DevOps files - require DevOps team review
+# GitHub & DevOps related files
 
-/. github/ @iam-mdthalha
+/.github/ @iam-mdthalha
 /Dockerfile @iam-mdthalha
 /nginx.conf @iam-mdthalha
 /docker-compose\*.yml @iam-mdthalha
 
-# Source code - require developer review
+# Application source code
 
 /src/ @thalha-cse
 
