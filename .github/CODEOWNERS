@@ -1,2 +1,23 @@
-# All changes require approval from
-* @iam-mdthalha
+# This file defines code owners for the repository
+
+# These users will be automatically requested for review
+
+# Default owners for everything
+
+- @iam-mdthalha
+
+# DevOps files - require DevOps team review
+
+/. github/ @iam-mdthalha
+/Dockerfile @iam-mdthalha
+/nginx.conf @iam-mdthalha
+/docker-compose\*.yml @iam-mdthalha
+
+# Source code - require developer review
+
+/src/ @thalha-cse
+
+# Documentation
+
+/docs/ @iam-mdthalha
+\*.md @iam-mdthalha
