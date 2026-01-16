@@ -1,2 +1,19 @@
-# All changes require approval from
-* @iam-mdthalha
+# Default owner for everything
+
+- @iam-mdthalha
+
+# GitHub & DevOps related files
+
+/.github/ @iam-mdthalha
+/Dockerfile @iam-mdthalha
+/nginx.conf @iam-mdthalha
+/docker-compose\*.yml @iam-mdthalha
+
+# Application source code
+
+/src/ @thalha-cse
+
+# Documentation
+
+/docs/ @iam-mdthalha
+\*.md @iam-mdthalha
