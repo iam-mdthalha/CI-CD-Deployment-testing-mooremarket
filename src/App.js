@@ -73,7 +73,7 @@ const App = () => {
         <div style={styles.dot}></div>
         <span>System Online</span>
       </div>
-      <p style={styles.footer}>© 2026 MooreMarket. All rights reserved.</p>
+      <p style={styles.footer}>© 2026 MooreMarket. All rights are reserved.</p>
     </div>
   );
 };
