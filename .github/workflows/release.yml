@@ -1,82 +1,86 @@
 name: Release - Create Version Tag
 
 on:
-  push:
+  push: 
     branches: 
       - main
   workflow_dispatch: 
-    inputs:
+    inputs:  
       version_type:
-        description:  'Version bump type'
+        description:   'Version bump type'
         required: true
         default: 'patch'
         type: choice
-        options:
+        options: 
           - patch
           - minor
           - major
 
 permissions:
-  contents:  write
-  pull-requests:  write
+  contents:   write
+  pull-requests: write
 
-jobs: 
+jobs:  
   release:
     name: 🏷️ Create Release
-    runs-on:  ubuntu-latest
+    runs-on: ubuntu-latest
     
     # Skip if commit is from release bot
-    if: "! contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, 'chore(release)')"
-
-    outputs:
-      new_version: ${{ steps.version.outputs.new_version }}
-      new_tag: ${{ steps.version.outputs.new_tag }}
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event. head_commit.message, 'chore(release)')"
 
     steps:
-      - name: Checkout code
-        uses:  actions/checkout@v4
-        with: 
-          fetch-depth:  0
+      - name:  Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Get current version
-        id: current
+      - name:  Get latest tag version
+        id:   current
         run: |
-          if [ -f version.json ]; then
-            CURRENT_VERSION=$(cat version.json | grep -oE '"version":\s*"[^"]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-          else
-            CURRENT_VERSION="0.0.0"
-          fi
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT_VERSION="${LATEST_TAG#v}"
+          
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $CURRENT_VERSION"
+          echo "Latest tag:   $LATEST_TAG"
+          echo "Current version:  $CURRENT_VERSION"
 
-      - name:  Determine version bump type
+      - name:   Determine version bump type
         id: bump_type
-        run:  |
+        run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             BUMP_TYPE="${{ github.event.inputs.version_type }}"
           else
-            COMMITS=$(git log --oneline -20)
+            # Get commits since last tag
+            LATEST_TAG="${{ steps.current.outputs.latest_tag }}"
+            
+            if [ "$LATEST_TAG" != "v0.0.0" ]; then
+              COMMITS=$(git log --oneline $LATEST_TAG..HEAD)
+            else
+              COMMITS=$(git log --oneline -20)
+            fi
             
             if echo "$COMMITS" | grep -qiE "BREAKING CHANGE"; then
               BUMP_TYPE="major"
-            elif echo "$COMMITS" | grep -qiE "feat: "; then
+            elif echo "$COMMITS" | grep -qiE "^[a-f0-9]+ feat"; then
               BUMP_TYPE="minor"
             else
               BUMP_TYPE="patch"
             fi
           fi
           echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
-          echo "Bump type: $BUMP_TYPE"
+          echo "Bump type:  $BUMP_TYPE"
 
-      - name:  Calculate new version
+      - name: Calculate new version
         id: version
         run: |
           CURRENT="${{ steps.current.outputs.current_version }}"
           BUMP_TYPE="${{ steps.bump_type.outputs.bump_type }}"
           
           # Split version
-          MAJOR=$(echo $CURRENT | cut -d.  -f1)
+          MAJOR=$(echo $CURRENT | cut -d. -f1)
           MINOR=$(echo $CURRENT | cut -d. -f2)
           PATCH=$(echo $CURRENT | cut -d. -f3)
           
@@ -101,33 +105,76 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "New version: $NEW_VERSION"
-          echo "New tag: $NEW_TAG"
+          echo "New tag:  $NEW_TAG"
+
+      - name: Check if tag already exists
+        id:  check_tag
+        run: |
+          NEW_TAG="${{ steps.version.outputs.new_tag }}"
+          
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Tag $NEW_TAG already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Tag $NEW_TAG does not exist, will create"
+          fi
+
+      - name: Check if release exists
+        id: check_release
+        if: steps.check_tag.outputs.exists == 'true'
+        run: |
+          NEW_TAG="${{ steps.version.outputs.new_tag }}"
+          
+          # Check if GitHub release exists for this tag
+          RELEASE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.RELEASE_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$NEW_TAG")
+          
+          if [ "$RELEASE_EXISTS" == "200" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Release for $NEW_TAG already exists.  Skipping..."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if already released
+        if: steps.check_tag.outputs.exists == 'true' && steps.check_release.outputs.exists == 'true'
+        run: |
+          echo "=============================================="
+          echo "  ⏭️  SKIPPING - Release already exists"
+          echo "=============================================="
+          echo ""
+          echo "Tag: ${{ steps.version.outputs.new_tag }}"
+          echo "This version was already released."
+          echo ""
+          echo "=============================================="
+          exit 0
 
       - name: Generate release notes
+        if: steps.check_tag.outputs.exists == 'false'
         run: |
           echo "## 🚀 Release ${{ steps.version.outputs.new_tag }}" > RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### What's Changed" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          PREV_TAG="${{ steps.current.outputs.latest_tag }}"
           
-          if [ -n "$PREV_TAG" ]; then
-            git log --pretty=format:"- %s (%h)" $PREV_TAG.. HEAD >> RELEASE_NOTES.md
+          if [ "$PREV_TAG" != "v0.0.0" ]; then
+            git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD >> RELEASE_NOTES.md
           else
-            git log --pretty=format:"- %s (%h)" -10 >> RELEASE_NOTES.md
+            git log --pretty=format:"- %s (%h)" -10 >> RELEASE_NOTES. md
           fi
           
           echo "" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "---" >> RELEASE_NOTES.md
           echo "*Released on $(date +'%Y-%m-%d %H:%M:%S UTC')*" >> RELEASE_NOTES.md
-          
-          echo "=== Release Notes ==="
-          cat RELEASE_NOTES.md
 
       - name: Create Git tag
-        run:  |
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
@@ -137,10 +184,11 @@ jobs:
           echo "✅ Tag ${{ steps.version.outputs.new_tag }} created and pushed"
 
       - name: Create GitHub Release
-        uses:  actions/github-script@v7
-        with: 
-          github-token:  ${{ secrets.RELEASE_TOKEN }}
-          script: |
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets. RELEASE_TOKEN }}
+          script:  |
             const fs = require('fs');
             const releaseNotes = fs.readFileSync('RELEASE_NOTES.md', 'utf8');
             
@@ -148,7 +196,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: '${{ steps.version.outputs.new_tag }}',
-              name: 'Release ${{ steps.version.outputs.new_tag }}',
+              name:  'Release ${{ steps.version.outputs.new_tag }}',
               body: releaseNotes,
               draft: false,
               prerelease: false
@@ -157,30 +205,37 @@ jobs:
             console.log(`✅ Release created: ${release.data.html_url}`);
 
       - name: Create version update branch
+        if: steps.check_tag.outputs.exists == 'false'
         run: |
           BRANCH_NAME="release/v${{ steps.version.outputs.new_version }}"
+          
+          # Check if branch already exists
+          if git ls-remote --heads origin $BRANCH_NAME | grep -q $BRANCH_NAME; then
+            echo "Branch $BRANCH_NAME already exists, deleting..."
+            git push origin --delete $BRANCH_NAME || true
+          fi
           
           git checkout -b $BRANCH_NAME
           
           # Update version.json
-          echo '{"version":  "${{ steps.version.outputs.new_version }}"}' > version.json
+          echo '{"version": "${{ steps.version.outputs.new_version }}"}' > version.json
           
           # Create/Update CHANGELOG.md
           if [ !  -f CHANGELOG.md ]; then
             echo "# Changelog" > CHANGELOG.md
             echo "" >> CHANGELOG.md
-            echo "All notable changes to this project will be documented in this file." >> CHANGELOG.md
+            echo "All notable changes to this project will be documented in this file." >> CHANGELOG. md
             echo "" >> CHANGELOG.md
           fi
           
-          # Create temp file with new entry
+          # Create new entry
           echo "" > NEW_ENTRY.md
-          echo "## [${{ steps.version. outputs.new_tag }}] - $(date +'%Y-%m-%d')" >> NEW_ENTRY.md
+          echo "## [${{ steps.version.outputs.new_tag }}] - $(date +'%Y-%m-%d')" >> NEW_ENTRY.md
           echo "" >> NEW_ENTRY.md
           
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            git log --pretty=format:"- %s" $PREV_TAG..HEAD~1 >> NEW_ENTRY.md || echo "- Release ${{ steps.version.outputs.new_tag }}" >> NEW_ENTRY.md
+          PREV_TAG="${{ steps.current.outputs.latest_tag }}"
+          if [ "$PREV_TAG" != "v0.0.0" ]; then
+            git log --pretty=format:"- %s" $PREV_TAG..HEAD >> NEW_ENTRY.md || echo "- Release ${{ steps.version.outputs.new_tag }}" >> NEW_ENTRY.md
           else
             echo "- Initial release" >> NEW_ENTRY.md
           fi
@@ -188,23 +243,37 @@ jobs:
           
           # Merge changelog
           head -4 CHANGELOG.md > TEMP_CL.md
-          cat NEW_ENTRY. md >> TEMP_CL.md
-          tail -n +5 CHANGELOG. md >> TEMP_CL.md 2>/dev/null || true
-          mv TEMP_CL.md CHANGELOG. md
+          cat NEW_ENTRY.md >> TEMP_CL.md
+          tail -n +5 CHANGELOG.md >> TEMP_CL.md 2>/dev/null || true
+          mv TEMP_CL.md CHANGELOG.md
           rm -f NEW_ENTRY.md
           
           git add version.json CHANGELOG.md
           git commit -m "chore(release): update version to ${{ steps.version.outputs.new_version }} [skip ci]"
           git push origin $BRANCH_NAME
           
-          echo "✅ Branch $BRANCH_NAME created and pushed"
+          echo "✅ Branch $BRANCH_NAME created"
 
       - name: Create Pull Request
+        if: steps.check_tag.outputs.exists == 'false'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.RELEASE_TOKEN }}
           script: |
             const branchName = `release/v${{ steps.version.outputs.new_version }}`;
+            
+            // Check if PR already exists
+            const existingPRs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branchName}`,
+              state: 'open'
+            });
+            
+            if (existingPRs.data.length > 0) {
+              console.log(`⚠️ PR already exists:  #${existingPRs.data[0].number}`);
+              return;
+            }
             
             const pr = await github.rest.pulls.create({
               owner: context.repo.owner,
@@ -214,36 +283,36 @@ jobs:
               base: 'main',
               body: `## 🏷️ Version Update PR
             
-            This PR updates version files after release **${{ steps.version.outputs.new_tag }}**.
+            This PR updates version files after release **${{ steps.version.outputs.new_tag }}**. 
             
             ### Changes
             - ✅ Git tag \`${{ steps.version.outputs.new_tag }}\` created
             - ✅ GitHub Release created
-            - 📝 \`version.json\` updated to \`${{ steps.version.outputs. new_version }}\`
+            - 📝 \`version.json\` updated to \`${{ steps.version.outputs.new_version }}\`
             - 📝 \`CHANGELOG.md\` updated
             
             ### Action Required
             **Please merge this PR to complete the release process.**
             
             ---
-            *This PR was automatically created by the release workflow.*`
+            *Automatically created by release workflow*`
             });
             
-            console.log(`✅ PR #${pr.data. number} created:  ${pr.data. html_url}`);
+            console.log(`✅ PR #${pr.data.number} created: ${pr.data.html_url}`);
 
       - name: Summary
         run: |
           echo ""
           echo "=============================================="
-          echo "        🎉 RELEASE COMPLETE"
-          echo "=============================================="
-          echo ""
-          echo "📦 Version:  ${{ steps.version.outputs.new_version }}"
-          echo "🏷️  Tag: ${{ steps.version.outputs.new_tag }}"
-          echo ""
-          echo "✅ Git tag created"
-          echo "✅ GitHub Release created"
-          echo "✅ Version update PR created"
-          echo ""
-          echo "👉 Please merge the PR to update version files"
+          if [ "${{ steps.check_tag.outputs.exists }}" == "true" ]; then
+            echo "  ⏭️  Release ${{ steps.version.outputs.new_tag }} already exists"
+          else
+            echo "  🎉 RELEASE ${{ steps.version.outputs.new_tag }} COMPLETE"
+            echo ""
+            echo "  ✅ Git tag created"
+            echo "  ✅ GitHub Release created"
+            echo "  ✅ Version update PR created"
+            echo ""
+            echo "  👉 Please merge the PR to update version files"
+          fi
           echo "=============================================="
