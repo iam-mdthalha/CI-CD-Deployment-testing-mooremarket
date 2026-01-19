@@ -82,7 +82,7 @@ jobs:
             echo "Image:  ${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
             echo "=============================================="
             
-            /home/deploy/scripts/deploy-mooremarket.sh "${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
+            /home/alphabit/scripts/deploy-mooremarket.sh "${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
 
       - name:  Verify deployment
         uses: appleboy/ssh-action@v1.0.3
