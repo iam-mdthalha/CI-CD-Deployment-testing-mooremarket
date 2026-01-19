@@ -2,13 +2,9 @@ name: CD - Deploy to Production
 
 on:
   push: 
-    tags:
-      - 'v*'   # Trigger on version tags
+    branches: 
+      - main
   workflow_dispatch:
-    inputs: 
-      version: 
-        description: 'Version to deploy (e.g., v1.0.0)'
-        required: true
 
 permissions:
   contents: read
@@ -18,36 +14,22 @@ jobs:
     name: 🐳 Build and Push Docker Image
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      image_tag: ${{ steps.version.outputs.image_tag }}
+      image_tag: ${{ steps.vars.outputs.image_tag }}
 
     steps:
       - name:  Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Get version
-        id: version
+      - name: Set variables
+        id: vars
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
+          SHORT_SHA="${GITHUB_SHA::7}"
+          DATE_TAG=$(date +%Y%m%d)
+          IMAGE_TAG="${DATE_TAG}-${SHORT_SHA}"
           
-          # Remove 'v' prefix for docker tag
-          VERSION_NUMBER="${VERSION#v}"
-          SHORT_SHA="${GITHUB_SHA:: 7}"
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "version_number=$VERSION_NUMBER" >> $GITHUB_OUTPUT
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "image_tag=$VERSION_NUMBER" >> $GITHUB_OUTPUT
-          
-          echo "Version: $VERSION"
-          echo "Version Number: $VERSION_NUMBER"
-          echo "Short SHA: $SHORT_SHA"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $IMAGE_TAG"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,27 +43,18 @@ jobs:
       - name: Build and push Docker image
         run: |
           IMAGE_BASE="${{ secrets.DOCKERHUB_USERNAME }}/mooremarket"
-          VERSION="${{ steps.version.outputs.version_number }}"
-          SHORT_SHA="${{ steps.version.outputs.short_sha }}"
+          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
           
-          # Build image
-          docker build -t $IMAGE_BASE:$VERSION . 
+          docker build -t $IMAGE_BASE: $IMAGE_TAG .
+          docker tag $IMAGE_BASE:$IMAGE_TAG $IMAGE_BASE:latest
           
-          # Tag with multiple tags
-          docker tag $IMAGE_BASE:$VERSION $IMAGE_BASE:$SHORT_SHA
-          docker tag $IMAGE_BASE:$VERSION $IMAGE_BASE:latest
-          
-          # Push all tags
-          docker push $IMAGE_BASE:$VERSION
-          docker push $IMAGE_BASE:$SHORT_SHA
+          docker push $IMAGE_BASE: $IMAGE_TAG
           docker push $IMAGE_BASE:latest
           
           echo "=============================================="
-          echo "        DOCKER IMAGES PUSHED"
-          echo "=============================================="
-          echo "📦 $IMAGE_BASE:$VERSION"
-          echo "📦 $IMAGE_BASE:$SHORT_SHA"
-          echo "📦 $IMAGE_BASE:latest"
+          echo "  📦 Images pushed:"
+          echo "  - $IMAGE_BASE:$IMAGE_TAG"
+          echo "  - $IMAGE_BASE:latest"
           echo "=============================================="
 
   deploy:
@@ -93,7 +66,6 @@ jobs:
       - name:  Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         env:
-          VERSION: ${{ needs.build-and-push.outputs.version }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
@@ -103,15 +75,14 @@ jobs:
           port: 22
           timeout: 120s
           command_timeout: 10m
-          envs: VERSION,IMAGE_TAG,DOCKERHUB_USER
-          script:  |
+          envs: IMAGE_TAG,DOCKERHUB_USER
+          script: |
             echo "=============================================="
             echo "Deploying mooremarket"
-            echo "Version: ${VERSION}"
             echo "Image:  ${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
             echo "=============================================="
             
-            /home/alphabit/scripts/deploy-mooremarket.sh "${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
+            /home/deploy/scripts/deploy-mooremarket.sh "${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
 
       - name:  Verify deployment
         uses: appleboy/ssh-action@v1.0.3
@@ -122,16 +93,15 @@ jobs:
           port: 22
           timeout: 60s
           script: |
-            /home/alphabit/scripts/status.sh
+            /home/deploy/scripts/status.sh
 
       - name: Deployment Summary
         run: |
           echo "=============================================="
-          echo "        DEPLOYMENT COMPLETE"
+          echo "  🎉 DEPLOYMENT COMPLETE"
           echo "=============================================="
           echo ""
-          echo "📦 Version: ${{ needs.build-and-push.outputs.version }}"
-          echo "🐳 Image: mooremarket:${{ needs.build-and-push.outputs.image_tag }}"
-          echo "🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
+          echo "  🐳 Image: mooremarket:${{ needs.build-and-push.outputs.image_tag }}"
+          echo "  🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
           echo ""
           echo "=============================================="
