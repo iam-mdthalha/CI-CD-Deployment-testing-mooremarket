@@ -1,10 +1,13 @@
-name: CD - Deploy to Production
+name: CD - Blue-Green Deploy
 
 on:
-  push: 
-    branches: 
-      - main
+  push:
+    branches: [ main ]
   workflow_dispatch:
+
+concurrency:
+  group: mooremarket-production
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -14,10 +17,11 @@ jobs:
     name: 🐳 Build and Push Docker Image
     runs-on: ubuntu-latest
     outputs:
-      image_tag: ${{ steps.vars.outputs.image_tag }}
+      image_tag:  ${{ steps.vars.outputs.image_tag }}
+      full_image: ${{ steps.vars.outputs.full_image }}
 
     steps:
-      - name:  Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set variables
@@ -26,10 +30,11 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           DATE_TAG=$(date +%Y%m%d)
           IMAGE_TAG="${DATE_TAG}-${SHORT_SHA}"
-          
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          FULL_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/mooremarket:${IMAGE_TAG}"
+
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "Image tag: $IMAGE_TAG"
+          echo "full_image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+          echo "Image: $FULL_IMAGE"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,32 +47,17 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          IMAGE_BASE="${{ secrets.DOCKERHUB_USERNAME }}/mooremarket"
-          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
-          
-          docker build -t $IMAGE_BASE:$IMAGE_TAG .
-          docker tag $IMAGE_BASE:$IMAGE_TAG $IMAGE_BASE:latest
-          
-          docker push $IMAGE_BASE:$IMAGE_TAG
-          docker push $IMAGE_BASE:latest
-          
-          echo "=============================================="
-          echo "  📦 Images pushed:"
-          echo "  - $IMAGE_BASE:$IMAGE_TAG"
-          echo "  - $IMAGE_BASE:latest"
-          echo "=============================================="
+          docker build -t "${{ steps.vars.outputs.full_image }}" .
+          docker push "${{ steps.vars.outputs.full_image }}"
 
   deploy:
-    name: 🚀 Deploy to Server
+    name: 🚀 Blue-Green Deploy
     runs-on: ubuntu-latest
     needs: build-and-push
 
     steps:
-      - name:  Deploy to server
+      - name: Deploy using Blue-Green strategy
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
@@ -75,16 +65,11 @@ jobs:
           port: 22
           timeout: 120s
           command_timeout: 10m
-          envs: IMAGE_TAG,DOCKERHUB_USER
           script: |
-            echo "=============================================="
-            echo "Deploying mooremarket"
-            echo "Image:  ${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
-            echo "=============================================="
-            
-            /home/alphabit/scripts/deploy-mooremarket.sh "${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
+            /home/deploy/scripts/deploy-mooremarket-bg.sh \
+              "${{ needs.build-and-push.outputs.full_image }}"
 
-      - name:  Verify deployment
+      - name: Show deployment status
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -93,15 +78,18 @@ jobs:
           port: 22
           timeout: 60s
           script: |
-            /home/alphabit/scripts/status.sh
+            /home/deploy/scripts/status-bg.sh
 
       - name: Deployment Summary
         run: |
           echo "=============================================="
-          echo "  🎉 DEPLOYMENT COMPLETE"
+          echo "  🎉 BLUE-GREEN DEPLOYMENT COMPLETE"
           echo "=============================================="
           echo ""
-          echo "  🐳 Image: mooremarket:${{ needs.build-and-push.outputs.image_tag }}"
+          echo "  🐳 Image: ${{ needs.build-and-push.outputs.full_image }}"
           echo "  🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
+          echo ""
+          echo "  🔄 Rollback:"
+          echo "     ssh deploy@${{ secrets.SERVER_IP }} '/home/deploy/scripts/rollback-bg.sh mooremarket'"
           echo ""
           echo "=============================================="
