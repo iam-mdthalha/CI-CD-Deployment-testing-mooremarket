@@ -90,6 +90,6 @@ jobs:
           echo "  🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
           echo ""
           echo "  🔄 Rollback:"
-          echo "     ssh deploy@${{ secrets.SERVER_IP }} '/home/deploy/scripts/rollback-bg.sh mooremarket'"
+          echo "     ssh deploy@${{ secrets.SERVER_IP }} '/home/alphabit/scripts/rollback-bg.sh mooremarket'"
           echo ""
           echo "=============================================="
