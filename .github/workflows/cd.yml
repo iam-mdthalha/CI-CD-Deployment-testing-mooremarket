@@ -66,7 +66,7 @@ jobs:
           timeout: 120s
           command_timeout: 10m
           script: |
-            /home/deploy/scripts/deploy-mooremarket-bg.sh \
+            /home/alphabit/scripts/deploy-mooremarket-bg.sh \
               "${{ needs.build-and-push.outputs.full_image }}"
 
       - name: Show deployment status
@@ -78,7 +78,7 @@ jobs:
           port: 22
           timeout: 60s
           script: |
-            /home/deploy/scripts/status-bg.sh
+            /home/mooremarket/scripts/status-bg.sh
 
       - name: Deployment Summary
         run: |
