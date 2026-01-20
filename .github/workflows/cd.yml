@@ -2,12 +2,9 @@ name: CD - Blue-Green Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
-
-concurrency:
-  group: mooremarket-production
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -17,7 +14,7 @@ jobs:
     name: 🐳 Build and Push Docker Image
     runs-on: ubuntu-latest
     outputs:
-      image_tag:  ${{ steps.vars.outputs.image_tag }}
+      image_tag: ${{ steps.vars.outputs.image_tag }}
       full_image: ${{ steps.vars.outputs.full_image }}
 
     steps:
@@ -30,11 +27,26 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           DATE_TAG=$(date +%Y%m%d)
           IMAGE_TAG="${DATE_TAG}-${SHORT_SHA}"
-          FULL_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/mooremarket:${IMAGE_TAG}"
+          DOCKERHUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          FULL_IMAGE="${DOCKERHUB_USER}/mooremarket:${IMAGE_TAG}"
 
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "full_image=$FULL_IMAGE" >> $GITHUB_OUTPUT
-          echo "Image: $FULL_IMAGE"
+
+          echo "================================="
+          echo "IMAGE_TAG:  $IMAGE_TAG"
+          echo "FULL_IMAGE: $FULL_IMAGE"
+          echo "================================="
+
+      - name: Verify outputs
+        run: |
+          echo "Verifying outputs..."
+          echo "full_image=${{ steps.vars.outputs.full_image }}"
+
+          if [ -z "${{ steps.vars.outputs.full_image }}" ]; then
+            echo "ERROR: full_image is empty"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -56,6 +68,13 @@ jobs:
     needs: build-and-push
 
     steps:
+      - name: Debug outputs
+        run: |
+          echo "================================="
+          echo "full_image: ${{ needs.build-and-push.outputs.full_image }}"
+          echo "image_tag:  ${{ needs.build-and-push.outputs.image_tag }}"
+          echo "================================="
+
       - name: Deploy using Blue-Green strategy
         uses: appleboy/ssh-action@v1.0.3
         env:
@@ -69,9 +88,12 @@ jobs:
           command_timeout: 10m
           envs: FULL_IMAGE
           script: |
-              echo "Deploying image: $FULL_IMAGE"
-              /home/alphabit/scripts/deploy-mooremarket-bg.sh "$FULL_IMAGE"
+            echo "=============================================="
+            echo "Deploying mooremarket"
+            echo "Image: $FULL_IMAGE"
+            echo "=============================================="
 
+            /home/alphabit/scripts/deploy-mooremarket-bg.sh "$FULL_IMAGE"
 
       - name: Show deployment status
         uses: appleboy/ssh-action@v1.0.3
@@ -82,18 +104,12 @@ jobs:
           port: 22
           timeout: 60s
           script: |
-            /home/mooremarket/scripts/status-bg.sh
+            /home/alphabit/scripts/status-bg.sh
 
       - name: Deployment Summary
         run: |
           echo "=============================================="
-          echo "  🎉 BLUE-GREEN DEPLOYMENT COMPLETE"
-          echo "=============================================="
-          echo ""
-          echo "  🐳 Image: ${{ needs.build-and-push.outputs.full_image }}"
-          echo "  🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
-          echo ""
-          echo "  🔄 Rollback:"
-          echo "     ssh deploy@${{ secrets.SERVER_IP }} '/home/alphabit/scripts/rollback-bg.sh mooremarket'"
-          echo ""
+          echo "🎉 BLUE-GREEN DEPLOYMENT COMPLETE"
+          echo "🐳 Image: ${{ needs.build-and-push.outputs.full_image }}"
+          echo "🌐 URL: http://${{ secrets.SERVER_IP }}:3080"
           echo "=============================================="
