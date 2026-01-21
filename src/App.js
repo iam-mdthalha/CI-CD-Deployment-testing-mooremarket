@@ -69,7 +69,7 @@ const App = () => {
       <div style={styles.logo}>🛒</div>
       <h1 style={styles.title}>MooreMarket </h1>
       <p style={styles.subtitle}>Your Premium Shopping Destination</p>
-      <p style={styles.subtitle}>Version 1.0</p>
+      <p style={styles.subtitle}>Version 2.0</p>
       
       <div style={styles.status}>
         <div style={styles.dot}></div>
